@@ -132,7 +132,6 @@ def diag(S):
     if args.v:
         print(S)
 
-
 try:
     elf_file = open(args.file_name, "rb")
 except:
@@ -217,15 +216,22 @@ elif ram_segments_present:
 elif flash_segments_present:
     diag("Flash only binary; UF2 will program flash.")
 # create UF2 blocks
-uf2_records = []
+uf2_data=bytearray()
+#TODO: make sure ELF segment layout follows assumptions
 for p_hdr in loadable_segments:
     size = min(p_hdr.ph_filesz, p_hdr.ph_memsize)
     elf_file.seek(p_hdr.ph_offset)
-    while size > 0:
-        chunk_size = min(size, 256)
-        uf2 = Uf2Record(p_hdr.ph_paddr, elf_file.read(chunk_size))
-        uf2_records.append(uf2)
-        size = size-chunk_size
+    uf2_data = uf2_data + elf_file.read(size)
+    #elf_file.seek(p_hdr.ph_offset)
+uf2_records = []
+chunks=0
+paddr=loadable_segments[0].ph_paddr
+while len(uf2_data) > 0:
+    chunk_size = min(len(uf2_data),256)
+    uf2 = Uf2Record(paddr+256*chunks, uf2_data[:chunk_size])
+    uf2_records.append(uf2)
+    uf2_data = uf2_data[chunk_size:]
+    chunks+=1
 try:
     ofile_name = ".".join(args.file_name.split(".")[0:-1])+".uf2"
     ofile_name = ofile_name if not args.o else args.o
@@ -234,5 +240,6 @@ try:
 except:
     sys.exit("Could not open file: %s" % (args.ofile_name))
 for u in uf2_records:
+    diag( "Writing UF2 record of 256B @ addr %s"%(hex(u.addr)))
     ofile.write(u.pack())
 ofile.close()
