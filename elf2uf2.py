@@ -203,7 +203,7 @@ for i in range(0, elf_file_hdr.e_phnum):
     if memory == "flash":
         flash_segments_present = True
     if elf_prog_hdr.ph_type == 1 and size != 0 and memory != "none":
-        diag("Found loadable %s segment at 0x%x" %
+        diag("ELF contains loadable %s segment at 0x%x" %
              (memory, elf_prog_hdr.ph_paddr))
         loadable_segments.append(elf_prog_hdr)
     else:
@@ -215,23 +215,34 @@ elif ram_segments_present:
     diag("RAM only binary; UF2 will program RAM only.")
 elif flash_segments_present:
     diag("Flash only binary; UF2 will program flash.")
-# create UF2 blocks
-uf2_data=bytearray()
-#TODO: make sure ELF segment layout follows assumptions
+#Get list of segments
+# DOES NOT CHECK FOR OVERLAP
+# ASSUME there can be non-contiguous segments?
+uf2_data=[]
+segment_data=bytearray()
+seg_paddr=loadable_segments[0].ph_paddr
 for p_hdr in loadable_segments:
     size = min(p_hdr.ph_filesz, p_hdr.ph_memsize)
     elf_file.seek(p_hdr.ph_offset)
-    uf2_data = uf2_data + elf_file.read(size)
-    #elf_file.seek(p_hdr.ph_offset)
+    data = elf_file.read(size)
+    if seg_paddr + len(segment_data) != p_hdr.ph_paddr:
+        uf2_data.append( (seg_paddr,segment_data) )
+        seg_paddr = p_hdr.ph_paddr
+        segment_data = data
+    else:
+        segment_data = segment_data + data
+uf2_data.append( (seg_paddr,segment_data) )
+seg_paddr = p_hdr.ph_paddr
+# create UF2 blocks 
 uf2_records = []
-chunks=0
-paddr=loadable_segments[0].ph_paddr
-while len(uf2_data) > 0:
-    chunk_size = min(len(uf2_data),256)
-    uf2 = Uf2Record(paddr+256*chunks, uf2_data[:chunk_size])
-    uf2_records.append(uf2)
-    uf2_data = uf2_data[chunk_size:]
-    chunks+=1
+for (paddr,data) in uf2_data:
+    diag("Processing %d byte segment at physical address %x"%(len(data),paddr))
+    while len(data) > 0:
+        chunk_size = min(len(data),256)
+        uf2 = Uf2Record(paddr, data[:chunk_size])
+        uf2_records.append(uf2)
+        paddr += chunk_size
+        data = data[chunk_size:]
 try:
     ofile_name = ".".join(args.file_name.split(".")[0:-1])+".uf2"
     ofile_name = ofile_name if not args.o else args.o
